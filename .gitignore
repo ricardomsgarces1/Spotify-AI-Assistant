@@ -172,3 +172,10 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Holds Spotify token
+spotify_token.json
+
+# Generate files
+.vscode
+source/
