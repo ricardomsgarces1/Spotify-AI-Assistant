@@ -9,6 +9,13 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
+import pyttsx3
+import speech_recognition as sr
+from gtts import gTTS
+import pygame
+import time
+import tempfile
+
 
 # Load environment variables
 load_dotenv()
@@ -21,6 +28,7 @@ class SpotifyAgentClient:
         self.memory: List[ChatCompletionMessageParam] = []
         self.tool_defs: List[Dict[str, Any]] = []
         self.max_iterations = max_iterations
+        self.engine = pyttsx3.init()
 
     async def connect(self):
         # Spawn the MCP server via stdio
@@ -45,7 +53,8 @@ class SpotifyAgentClient:
         system_prompt = (
             "You are a reasoning agent with access to Spotify tools. "
             "When needing Spotify actions (searching tracks, controlling playback, managing playlists), decide and call the correct function. "
-            "Use a ReAct-style loop: think, act, observe, repeat until you have a final answer."
+            "Use a ReAct-style loop: think, act, observe, repeat until you have a final answer." 
+            "The output generated should be easily read by an AI voice assistant. Do not include URLs or emojis in the output."
         )
         self.memory.append({"role": "system", "content": system_prompt})
 
@@ -84,9 +93,6 @@ class SpotifyAgentClient:
                     print("[Agent] Exception during tool call:\n" + traceback.format_exc())
                     raise
 
-                # result = await self.session.call_tool(func_name, args)
-                # print(f"[Agent] Tool '{func_name}' returned: {result.content}")
-
                 # Record the function call and its observation
                 self.memory.append({"role": "assistant", "name": func_name, "content": json.dumps(args)})
                 self.memory.append(cast(
@@ -106,16 +112,61 @@ class SpotifyAgentClient:
 
         # Reached max iterations without final answer
         return "I'm sorry, I couldn't complete the request."
+    
+    
 
+    def speak(self, text: str):
+        try:
+            print(f"[Speak] Speaking: {text}")
+            tts = gTTS(text=text, lang='en')
+
+            # Save to a file in the current directory
+            filename = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=".").name
+            tts.save(filename)
+
+            # Initialize and play using pygame
+            pygame.mixer.init()
+            pygame.mixer.music.load(filename)
+            pygame.mixer.music.play()
+
+            # Wait until the audio is done playing
+            while pygame.mixer.music.get_busy():
+                time.sleep(0.1)
+
+        except Exception as e:
+            print("Speech error:", e)
+
+    def record_voice(self) -> str:
+        recognizer = sr.Recognizer()
+        mic = sr.Microphone()
+
+        print("Say something...")
+        with mic as source:
+            recognizer.adjust_for_ambient_noise(source)
+            audio = recognizer.listen(source)
+
+        try:
+            text = recognizer.recognize_google(audio)
+            print(f"You said: {text}")
+            return text
+        except sr.UnknownValueError:
+            print("Google Speech Recognition could not understand audio.")
+            return ""
+        except sr.RequestError as e:
+            print(f"Could not request results from Google Speech Recognition service; {e}")
+            return ""
+        
     async def chat_loop(self):
-        print("Spotify Agent Chat (type 'quit' to exit)")
+        print("Spotify Agent Chat (say 'quit' to exit)")
         while True:
-            query = input("\n> ").strip()
+            #query = input("\n> ").strip()
+            query = self.record_voice().strip()
             if not query or query.lower() == "quit":
                 break
             try:
                 answer = await self.run_agent(query)
                 print("\n" + answer)
+                self.speak(answer)
             except Exception as e:
                 print("Error:", e)
 
